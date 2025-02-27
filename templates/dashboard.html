@@ -8,10 +8,17 @@
     <script src="https://code.jquery.com/jquery-3.6.0.min.js"></script>
 </head>
 <body class="container mt-4">
-    <div class="d-flex justify-content-between align-items-center">
-        <h2>Inventāra pārvaldība</h2>
-        <a href="{{ url_for('logout') }}" class="btn btn-danger">Iziet</a>
-    </div>
+    <header class="d-flex justify-content-between align-items-center">
+        <h1>Inventāra pārvaldība</h1>
+        <div class="header-right">
+            {% if session['user_id'] %}
+                <a href="{{ url_for('logout') }}" class="btn btn-danger">Iziet</a>
+                {% if is_admin %}
+                    <a href="{{ url_for('add_user') }}" class="btn btn-primary">Pievienot lietotāju</a>
+                {% endif %}
+            {% endif %}
+        </div>
+    </header>
 
     {% with messages = get_flashed_messages(with_categories=true) %}
         {% if messages %}

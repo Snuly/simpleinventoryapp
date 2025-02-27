@@ -11,6 +11,15 @@ def get_db_connection():
     conn.row_factory = sqlite3.Row
     return conn
 
+# Admin check
+def is_admin(user_id):
+    conn = get_db_connection()
+    cursor = conn.cursor()
+    cursor.execute("SELECT * FROM users WHERE id = ?", (user_id,))
+    user = cursor.fetchone()
+    conn.close()
+    return user['is_admin'] == 1 
+
 # Home Route
 @app.route('/')
 def home():
@@ -20,23 +29,25 @@ def home():
 @app.route('/login', methods=['GET', 'POST'])
 def login():
     if request.method == 'POST':
-        username = request.form['username']
+        username = request.form['username'].strip().lower()
         password = request.form['password']
 
         conn = get_db_connection()
         cursor = conn.cursor()
         cursor.execute("SELECT * FROM users WHERE username = ?", (username,))
         user = cursor.fetchone()
-        conn.close()
 
         if user is None:
             flash("Lietotājs nav atrasts!", "danger")
         elif not check_password_hash(user['password'], password):
             flash("Nepareiza parole!", "danger")
         else:
-            flash("Veiksmīga pievienošanās!", "success")
             session['user_id'] = user['id']
+            flash("Veiksmīga pievienošanās!", "success")
+            conn.close()
             return redirect(url_for('dashboard'))
+
+        conn.close()
 
     return render_template('login.html')
 
@@ -47,15 +58,17 @@ def logout():
     flash("Jūs esat atteicies!", "info")
     return redirect(url_for('login'))
 
-# Dashboard
+# Dashboard Route
 @app.route('/dashboard')
 def dashboard():
     if 'user_id' not in session:
         flash("Jums jāpieslēdzas!", "warning")
         return redirect(url_for('login'))
 
+    admin_status = is_admin(session['user_id'])
+    
     sort_option = request.args.get('sort', 'alphabet')
-
+    
     conn = get_db_connection()
     if sort_option == 'asc':
         # Sort by ascending
@@ -68,7 +81,7 @@ def dashboard():
         items = conn.execute("SELECT * FROM inventory ORDER BY name ASC").fetchall()
     conn.close()
 
-    return render_template('dashboard.html', items=items)
+    return render_template('dashboard.html', items=items, is_admin=admin_status)
 
 # Add Item Route
 @app.route('/add_item', methods=['POST'])
@@ -115,6 +128,38 @@ def delete_item(item_id):
     flash("Prece dzēsta!", "success")
     return redirect(url_for('dashboard'))
 
+# Add user function
+@app.route('/add_user', methods=['GET', 'POST'])
+def add_user():
+    if 'user_id' not in session or not is_admin(session['user_id']):
+        flash("Tikai administratori var pievienot lietotājus!", "danger")
+        return redirect(url_for('dashboard'))
+
+    if request.method == 'POST':
+        username = request.form['username'].strip().lower()
+        password = request.form['password']
+        hashed_password = generate_password_hash(password, method="pbkdf2:sha256")
+
+        try:
+            conn = get_db_connection()
+            cursor = conn.cursor()
+            
+            # Check if username already exists
+            cursor.execute("SELECT * FROM users WHERE username = ?", (username,))
+            if cursor.fetchone():
+                flash("Lietotājvārds jau eksistē!", "danger")
+                return redirect(url_for('add_user'))
+
+            # Insert new user
+            cursor.execute("INSERT INTO users (username, password, is_admin) VALUES (?, ?, ?)", (username, hashed_password, 0))
+            conn.commit()
+            flash("Jauns lietotājs pievienots!", "success")
+            return redirect(url_for('dashboard'))
+        finally:
+            conn.close()
+
+    return render_template('add_user.html')
+
 # Autocomplete
 @app.route('/autocomplete', methods=['GET'])
 def autocomplete():
@@ -137,7 +182,8 @@ def init_db():
         CREATE TABLE IF NOT EXISTS users (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
             username TEXT UNIQUE NOT NULL,
-            password TEXT NOT NULL
+            password TEXT NOT NULL,
+            is_admin INT NOT NULL
         )
     ''')
 
@@ -153,8 +199,8 @@ def init_db():
     # Insert an admin user
     cursor.execute("SELECT * FROM users WHERE username = ?", ("admin",))
     if not cursor.fetchone():
-        hashed_password = generate_password_hash("test123")
-        cursor.execute("INSERT INTO users (username, password) VALUES (?, ?)", ("admin", hashed_password))
+        hashed_password = generate_password_hash("admin")
+        cursor.execute("INSERT INTO users (username, password, is_admin) VALUES (?, ?, ?)", ("admin", hashed_password, 1))
 
     conn.commit()
     conn.close()
