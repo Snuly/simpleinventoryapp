@@ -54,9 +54,20 @@ def dashboard():
         flash("Jums jāpieslēdzas!", "warning")
         return redirect(url_for('login'))
 
+    sort_option = request.args.get('sort', 'alphabet')
+
     conn = get_db_connection()
-    items = conn.execute("SELECT * FROM inventory").fetchall()
+    if sort_option == 'asc':
+        # Sort by ascending
+        items = conn.execute("SELECT * FROM inventory ORDER BY quantity ASC").fetchall()
+    elif sort_option == 'desc':
+        # Sort by descending
+        items = conn.execute("SELECT * FROM inventory ORDER BY quantity DESC").fetchall()
+    else:
+        # Default sorting (alphabetical)
+        items = conn.execute("SELECT * FROM inventory ORDER BY name ASC").fetchall()
     conn.close()
+
     return render_template('dashboard.html', items=items)
 
 # Add Item Route
