@@ -1,1 +1,1 @@
-A simple inventory app for overseeing and managing your buisnesses items/products.
+A simple inventory app for overseeing and managing your businesses items/products.
