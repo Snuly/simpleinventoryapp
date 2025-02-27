@@ -21,7 +21,7 @@
         {% endif %}
     {% endwith %}
 
-    <form action="{{ url_for('add_item') }}?sort={{ request.args.get('sort', 'alphabet') }}" method="POST" class="mb-4">
+    <form action="{{ url_for('add_item') }}?sort={{ request.args.get('sort', 'alphabet') }}" method="POST" class="mb-4" id="inventory-form">
         <div class="mb-3">
             <label for="name" class="form-label">Preces nosaukums:</label>
             <input type="text" class="form-control" id="name" name="name" required autocomplete="off">
@@ -75,6 +75,14 @@
                 }
             });
         });
+        // Text Caps
+        document.getElementById("inventory-form").addEventListener("submit", function(event) {
+        let itemNameInput = document.getElementById("name");
+        let itemName = itemNameInput.value.trim();
+
+        if (itemName) {
+            itemNameInput.value = itemName.charAt(0).toUpperCase() + itemName.slice(1);
+        }});
     </script>
 </body>
 </html>
