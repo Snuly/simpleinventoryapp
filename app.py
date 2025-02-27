@@ -34,7 +34,7 @@ def login():
         elif not check_password_hash(user['password'], password):
             flash("Nepareiza parole!", "danger")
         else:
-            flash("Veiksmīga pieteikšanās!", "success")
+            flash("Veiksmīga pievienošanās!", "success")
             session['user_id'] = user['id']
             return redirect(url_for('dashboard'))
 
@@ -104,7 +104,7 @@ def delete_item(item_id):
     flash("Prece dzēsta!", "success")
     return redirect(url_for('dashboard'))
 
-# autocomplete
+# Autocomplete
 @app.route('/autocomplete', methods=['GET'])
 def autocomplete():
     query = request.args.get('query', '')
