@@ -1,4 +1,4 @@
-from flask import Flask, render_template, request, redirect, url_for, flash, session
+from flask import Flask, render_template, request, redirect, url_for, flash, session, jsonify
 import sqlite3
 from werkzeug.security import generate_password_hash, check_password_hash
 
@@ -71,11 +71,21 @@ def add_item():
 
     conn = get_db_connection()
     cursor = conn.cursor()
-    cursor.execute("INSERT INTO inventory (name, quantity) VALUES (?, ?)", (name, quantity))
+    
+    # Check if the item already exists
+    cursor.execute("SELECT * FROM inventory WHERE name = ?", (name,))
+    existing_item = cursor.fetchone()
+
+    if existing_item:
+        new_quantity = existing_item['quantity'] + int(quantity)
+        cursor.execute("UPDATE inventory SET quantity = ? WHERE id = ?", (new_quantity, existing_item['id']))
+    else:
+        cursor.execute("INSERT INTO inventory (name, quantity) VALUES (?, ?)", (name, quantity))
+
     conn.commit()
     conn.close()
 
-    flash("Prece pievienota!", "success")
+    flash("Prece pievienota vai atjaunināta!", "success")
     return redirect(url_for('dashboard'))
 
 # Delete Item Route
@@ -94,7 +104,19 @@ def delete_item(item_id):
     flash("Prece dzēsta!", "success")
     return redirect(url_for('dashboard'))
 
-# Initialize database
+# autocomplete
+@app.route('/autocomplete', methods=['GET'])
+def autocomplete():
+    query = request.args.get('query', '')
+
+    conn = get_db_connection()
+    cursor = conn.cursor()
+    cursor.execute("SELECT name FROM inventory WHERE name LIKE ? LIMIT 5", (f"%{query}%",))
+    results = [row['name'] for row in cursor.fetchall()]
+    conn.close()
+
+    return jsonify(results)
+
 def init_db():
     conn = get_db_connection()
     cursor = conn.cursor()
