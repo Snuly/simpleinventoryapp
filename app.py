@@ -216,13 +216,35 @@ def autocomplete():
 
     return jsonify(results)
 
+# Item quantity updater
+@app.route('/update_quantity', methods=['POST'])
+def update_quantity():
+    if 'user_id' not in session:
+        flash("Lūdzu, piesakieties, lai veiktu izmaiņas.", "warning")
+        return redirect(url_for('login'))
+
+    item_id = request.form.get('item_id')
+    new_quantity = request.form.get('quantity')
+
+    if not item_id or not new_quantity.isdigit():
+        flash("Nederīga ievade!", "danger")
+        return redirect(url_for('dashboard'))
+
+    conn = get_db_connection()
+    cursor = conn.cursor()
+    cursor.execute("UPDATE inventory SET quantity = ? WHERE id = ?", (int(new_quantity), item_id))
+    conn.commit()
+    conn.close()
+
+    flash("Daudzums atjaunināts!", "success")
+    return redirect(url_for('dashboard'))
+
 # Session handler
 @app.before_request
 def check_session_timeout():
     session.modified = True  # Updates session timer on user activity
     if 'user_id' not in session:
         if request.endpoint not in ['login', 'static']:
-            flash("Your session has expired. Please log in again.", "warning")
             return redirect(url_for('login'))
 
 
