@@ -1,9 +1,25 @@
 from flask import Flask, render_template, request, redirect, url_for, flash, session, jsonify
 import sqlite3
 from werkzeug.security import generate_password_hash, check_password_hash
+from flask_limiter import Limiter
+from flask_limiter.util import get_remote_address
+from flask_wtf.csrf import CSRFProtect
+from datetime import timedelta
+
 
 app = Flask(__name__)
 app.secret_key = '58195673'
+
+# CSRF protection
+csrf = CSRFProtect(app)
+
+# Brute force protection
+limiter = Limiter(key_func=get_remote_address)
+limiter.init_app(app)
+
+# Session expiration timer
+app.permanent_session_lifetime = timedelta(minutes=30)
+
 
 # Database connection
 def get_db_connection():
@@ -11,22 +27,19 @@ def get_db_connection():
     conn.row_factory = sqlite3.Row
     return conn
 
-# Admin check
-def is_admin(user_id):
-    conn = get_db_connection()
-    cursor = conn.cursor()
-    cursor.execute("SELECT * FROM users WHERE id = ?", (user_id,))
-    user = cursor.fetchone()
-    conn.close()
-    return user['is_admin'] == 1 
-
 # Home Route
 @app.route('/')
 def home():
     return redirect(url_for('login'))
 
+# Flask limiter error page
+@app.errorhandler(429)
+def ratelimit_error(e):
+    return render_template('rate_limited.html'), 429
+
 # Login Route
 @app.route('/login', methods=['GET', 'POST'])
+@limiter.limit("5 per minute") # Limits to 5 attempts per minute
 def login():
     if request.method == 'POST':
         username = request.form['username'].strip().lower()
@@ -55,8 +68,17 @@ def login():
 @app.route('/logout')
 def logout():
     session.pop('user_id', None)
-    flash("Jūs esat atteicies!", "info")
+    flash("Jūs esat izgājis!", "info")
     return redirect(url_for('login'))
+
+# Admin check
+def is_admin(user_id):
+    conn = get_db_connection()
+    cursor = conn.cursor()
+    cursor.execute("SELECT * FROM users WHERE id = ?", (user_id,))
+    user = cursor.fetchone()
+    conn.close()
+    return user['is_admin'] == 1 
 
 # Dashboard Route
 @app.route('/dashboard')
@@ -138,6 +160,27 @@ def add_user():
     if request.method == 'POST':
         username = request.form['username'].strip().lower()
         password = request.form['password']
+        admin = request.form.get('is_admin')
+
+        if admin == "on":
+            admin = 1
+        else:
+            admin = 0
+
+        if len(username) < 3:
+            flash("Lietotājvārdam jābūt vismaz 3 rakstzīmēm!", "danger")
+            return redirect(url_for('add_user'))
+        elif len(username) > 25:
+            flash("Lietotājvārdam jābūt īsākam!", "danger")
+            return redirect(url_for('add_user'))
+
+        if len(password) < 8 or not any(c.isdigit() for c in password) or not any(c in "!@#$%^&*" for c in password):
+            flash("Parolei jābūt vismaz 8 rakstzīmēm, vienam ciparam un vienam simbolam", "danger")
+            return redirect(url_for('add_user'))
+        elif len(password) > 25:
+            flash("Parolei jābūt īsākai!", "danger")
+            return redirect(url_for('add_user'))
+
         hashed_password = generate_password_hash(password, method="pbkdf2:sha256")
 
         try:
@@ -151,7 +194,7 @@ def add_user():
                 return redirect(url_for('add_user'))
 
             # Insert new user
-            cursor.execute("INSERT INTO users (username, password, is_admin) VALUES (?, ?, ?)", (username, hashed_password, 0))
+            cursor.execute("INSERT INTO users (username, password, is_admin) VALUES (?, ?, ?)", (username, hashed_password, admin))
             conn.commit()
             flash("Jauns lietotājs pievienots!", "success")
             return redirect(url_for('dashboard'))
@@ -172,6 +215,18 @@ def autocomplete():
     conn.close()
 
     return jsonify(results)
+
+# Session handler
+@app.before_request
+def check_session_timeout():
+    session.modified = True  # Updates session timer on user activity
+    if 'user_id' not in session:
+        if request.endpoint not in ['login', 'static']:
+            flash("Your session has expired. Please log in again.", "warning")
+            return redirect(url_for('login'))
+
+
+
 
 def init_db():
     conn = get_db_connection()
@@ -204,6 +259,8 @@ def init_db():
 
     conn.commit()
     conn.close()
+
+
 
 if __name__ == '__main__':
     init_db()
