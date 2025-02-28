@@ -1,0 +1,63 @@
+<!DOCTYPE html>
+<html lang="lv">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Lietotāju saraksts</title>
+    <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css">
+</head>
+<body class="container mt-4">
+    <h2>Lietotāju saraksts</h2>
+    <a href="{{ url_for('dashboard') }}" class="btn btn-secondary mb-3">Atpakaļ</a>
+
+    <table class="table">
+        <thead>
+            <tr>
+                <th>ID</th>
+                <th>Lietotājvārds</th>
+                <th>Darbība</th>
+            </tr>
+        </thead>
+        <tbody>
+            {% for user in users %}
+            <tr>
+                <td>{{ user.id }}</td>
+                <td>{{ user.username }}</td>
+                <td>
+                    {% if user.is_admin %}
+                        <button class="btn btn-secondary btn-sm" disabled>Nav pieejams</button>
+                    {% else %}
+                        <button class="btn btn-warning btn-sm" onclick="showResetForm('{{ user.id }}')">Atiestatīt paroli</button>
+                    {% endif %}
+
+                </td>
+            </tr>
+            <tr id="reset-form-{{ user.id }}" style="display: none;">
+                <td colspan="3">
+                    <form method="POST" action="{{ url_for('reset_password') }}">
+                        <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+                        <input type="hidden" name="user_id" value="{{ user.id }}">
+                        <div class="mb-2">
+                            <label for="new_password" class="form-label">Jaunā parole:</label>
+                            <input type="password" name="new_password" class="form-control" required>
+                        </div>
+                        <button type="submit" class="btn btn-success btn-sm">Saglabāt</button>
+                        <button type="button" class="btn btn-secondary btn-sm" onclick="hideResetForm('{{ user.id }}')">Atcelt</button>
+                    </form>
+                </td>
+            </tr>
+            {% endfor %}
+        </tbody>
+    </table>
+
+    <script>
+        function showResetForm(userId) {
+            document.getElementById("reset-form-" + userId).style.display = "table-row";
+        }
+
+        function hideResetForm(userId) {
+            document.getElementById("reset-form-" + userId).style.display = "none";
+        }
+    </script>
+</body>
+</html>

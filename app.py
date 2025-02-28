@@ -203,6 +203,22 @@ def add_user():
 
     return render_template('add_user.html')
 
+# View all users tab
+@app.route('/view_users')
+def view_users():
+    if 'user_id' not in session or not is_admin(session['user_id']):
+        flash("Jums nav atļaujas skatīt šo lapu.", "danger")
+        return redirect(url_for('dashboard'))
+
+    conn = get_db_connection()
+    cursor = conn.cursor()
+    cursor.execute("SELECT id, username, is_admin FROM users")
+    users = cursor.fetchall()
+    conn.close()
+
+    return render_template('view_users.html', users=users)
+
+
 # Autocomplete
 @app.route('/autocomplete', methods=['GET'])
 def autocomplete():
@@ -238,6 +254,31 @@ def update_quantity():
 
     flash("Daudzums atjaunināts!", "success")
     return redirect(url_for('dashboard'))
+
+# Password change function
+@app.route('/reset_password', methods=['POST'])
+def reset_password():
+    if 'user_id' not in session or not is_admin(session['user_id']):
+        flash("Jums nav atļaujas veikt šo darbību.", "danger")
+        return redirect(url_for('dashboard'))
+
+    user_id = request.form.get('user_id')
+    new_password = request.form.get('new_password')
+
+    if not user_id or not new_password:
+        flash("Lūdzu ievadiet jauno paroli.", "danger")
+        return redirect(url_for('view_users'))
+
+    hashed_password = generate_password_hash(new_password)
+
+    conn = get_db_connection()
+    cursor = conn.cursor()
+    cursor.execute("UPDATE users SET password = ? WHERE id = ?", (hashed_password, user_id))
+    conn.commit()
+    conn.close()
+
+    flash("Lietotāja parole atjaunināta!", "success")
+    return redirect(url_for('view_users'))
 
 # Session handler
 @app.before_request
