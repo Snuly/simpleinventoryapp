@@ -4,7 +4,7 @@ from werkzeug.security import generate_password_hash, check_password_hash
 from flask_limiter import Limiter
 from flask_limiter.util import get_remote_address
 from flask_wtf.csrf import CSRFProtect
-from datetime import timedelta
+from datetime import timedelta, datetime
 
 
 app = Flask(__name__)
@@ -20,6 +20,12 @@ limiter.init_app(app)
 # Session expiration timer
 app.permanent_session_lifetime = timedelta(minutes=30)
 
+# Local time converter
+def convert_to_local_time(utc_time):
+    if utc_time:
+        local_time = utc_time + timedelta(hours=2)
+        return local_time.strftime('%Y-%m-%d, %H:%M:%S')
+    return "N/A"
 
 # Database connection
 def get_db_connection():
@@ -90,20 +96,52 @@ def dashboard():
     admin_status = is_admin(session['user_id'])
     
     sort_option = request.args.get('sort', 'alphabet')
-    
-    conn = get_db_connection()
-    if sort_option == 'asc':
-        # Sort by ascending
-        items = conn.execute("SELECT * FROM inventory ORDER BY quantity ASC").fetchall()
-    elif sort_option == 'desc':
-        # Sort by descending
-        items = conn.execute("SELECT * FROM inventory ORDER BY quantity DESC").fetchall()
-    else:
-        # Default sorting (alphabetical)
-        items = conn.execute("SELECT * FROM inventory ORDER BY name ASC").fetchall()
-    conn.close()
+    search_query = request.args.get('search', '').strip()
 
-    return render_template('dashboard.html', items=items, is_admin=admin_status)
+    try:
+        conn = get_db_connection()
+        query = "SELECT * FROM inventory"
+        params = []
+
+        if search_query:
+            query += " WHERE name LIKE ?"
+            params.append('%' + search_query + '%')
+
+        if sort_option == 'asc':
+            query += " ORDER BY quantity ASC"
+        elif sort_option == 'desc':
+            query += " ORDER BY quantity DESC"
+        else:
+            query += " ORDER BY name ASC"
+
+        items = conn.execute(query, tuple(params)).fetchall()
+
+        # Process the items and return the response
+        updated_items = []
+        for item in items:
+            item_dict = dict(item)
+            if item_dict['last_modified_by']:
+                cursor = conn.execute("SELECT username FROM users WHERE id = ?", (item_dict['last_modified_by'],))
+                result = cursor.fetchone()
+                item_dict['last_modified_by_username'] = result['username'] if result else "N/A"
+            else:
+                item_dict['last_modified_by_username'] = "N/A"
+            if item_dict.get('last_modified_at'):
+                try:
+                    last_modified_date = datetime.strptime(item_dict['last_modified_at'], '%Y-%m-%d %H:%M:%S')
+                    item_dict['last_modified_at'] = last_modified_date
+                except ValueError:
+                    item_dict['last_modified_at'] = None
+            updated_items.append(item_dict)
+
+        conn.close()
+
+
+        return render_template('dashboard.html', items=updated_items, is_admin=admin_status, convert_to_local_time=convert_to_local_time)
+    except Exception as e:
+        app.logger.error(f"Error in dashboard route: {e}")
+        return "An error occurred while processing your request.", 500
+
 
 # Add Item Route
 @app.route('/add_item', methods=['POST'])
@@ -114,19 +152,22 @@ def add_item():
 
     name = request.form['name']
     quantity = request.form['quantity']
+    user_id = session['user_id']
 
     conn = get_db_connection()
     cursor = conn.cursor()
-    
+
     # Check if the item already exists
     cursor.execute("SELECT * FROM inventory WHERE name = ?", (name,))
     existing_item = cursor.fetchone()
 
     if existing_item:
         new_quantity = existing_item['quantity'] + int(quantity)
-        cursor.execute("UPDATE inventory SET quantity = ? WHERE id = ?", (new_quantity, existing_item['id']))
+        cursor.execute("UPDATE inventory SET quantity = ?, last_modified_by = ?, last_modified_at = CURRENT_TIMESTAMP WHERE id = ?", 
+                       (new_quantity, user_id, existing_item['id']))
     else:
-        cursor.execute("INSERT INTO inventory (name, quantity) VALUES (?, ?)", (name, quantity))
+        cursor.execute("INSERT INTO inventory (name, quantity, last_modified_by) VALUES (?, ?, ?)", 
+                       (name, quantity, user_id))
 
     conn.commit()
     conn.close()
@@ -167,13 +208,15 @@ def add_user():
         else:
             admin = 0
 
+        # Check username requirements
         if len(username) < 3:
             flash("Lietotājvārdam jābūt vismaz 3 rakstzīmēm!", "danger")
             return redirect(url_for('add_user'))
         elif len(username) > 25:
             flash("Lietotājvārdam jābūt īsākam!", "danger")
             return redirect(url_for('add_user'))
-
+    
+        # Check password requirements
         if len(password) < 8 or not any(c.isdigit() for c in password) or not any(c in "!@#$%^&*" for c in password):
             flash("Parolei jābūt vismaz 8 rakstzīmēm, vienam ciparam un vienam simbolam", "danger")
             return redirect(url_for('add_user'))
@@ -218,6 +261,48 @@ def view_users():
 
     return render_template('view_users.html', users=users)
 
+@app.route('/change_password', methods=['GET', 'POST'])
+def change_password():
+    if 'user_id' not in session:
+        flash("Vajag pieslēgties lai mainītu paroli!", "warning")
+        return redirect(url_for('login'))
+    
+    if request.method == 'POST':
+        old_password = request.form['old_password']
+        new_password = request.form['new_password']
+
+        # Get current user's data
+        conn = get_db_connection()
+        cursor = conn.cursor()
+        cursor.execute("SELECT * FROM users WHERE id = ?", (session['user_id'],))
+        user = cursor.fetchone()
+        conn.close()
+
+        # Check if the old password is correct
+        if not check_password_hash(user['password'], old_password):
+            flash("Vecā parole ir nepareiza!", "danger")
+            return redirect(url_for('change_password'))
+
+        # Check password requirements
+        if len(new_password) < 8 or not any(c.isdigit() for c in new_password) or not any(c in "!@#$%^&*" for c in new_password):
+            flash("Parolei jābūt vismaz 8 rakstzīmēm, vienam ciparam un vienam simbolam", "danger")
+            return redirect(url_for('change_password'))
+        elif len(new_password) > 25:
+            flash("Parolei jābūt īsākai!", "danger")
+            return redirect(url_for('change_password'))
+
+        # Update password
+        hashed_password = generate_password_hash(new_password, method="pbkdf2:sha256")
+        conn = get_db_connection()
+        cursor = conn.cursor()
+        cursor.execute("UPDATE users SET password = ? WHERE id = ?", (hashed_password, session['user_id']))
+        conn.commit()
+        conn.close()
+
+        flash("Parole mainīta!", "success")
+        return redirect(url_for('dashboard'))
+
+    return render_template('change_password.html')
 
 # Autocomplete
 @app.route('/autocomplete', methods=['GET'])
@@ -241,6 +326,7 @@ def update_quantity():
 
     item_id = request.form.get('item_id')
     new_quantity = request.form.get('quantity')
+    user_id = session['user_id']
 
     if not item_id or not new_quantity.isdigit():
         flash("Nederīga ievade!", "danger")
@@ -248,7 +334,8 @@ def update_quantity():
 
     conn = get_db_connection()
     cursor = conn.cursor()
-    cursor.execute("UPDATE inventory SET quantity = ? WHERE id = ?", (int(new_quantity), item_id))
+    cursor.execute("UPDATE inventory SET quantity = ?, last_modified_by = ?, last_modified_at = CURRENT_TIMESTAMP WHERE id = ?", 
+                   (int(new_quantity), user_id, item_id))
     conn.commit()
     conn.close()
 
@@ -296,7 +383,7 @@ def init_db():
     cursor = conn.cursor()
 
     # Create Users Table
-    cursor.execute('''
+    cursor.execute(''' 
         CREATE TABLE IF NOT EXISTS users (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
             username TEXT UNIQUE NOT NULL,
@@ -306,11 +393,14 @@ def init_db():
     ''')
 
     # Create Inventory Table
-    cursor.execute('''
+    cursor.execute(''' 
         CREATE TABLE IF NOT EXISTS inventory (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
             name TEXT NOT NULL,
-            quantity INTEGER NOT NULL
+            quantity INTEGER NOT NULL,
+            last_modified_by INTEGER,
+            last_modified_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+            FOREIGN KEY (last_modified_by) REFERENCES users (id)
         )
     ''')
 
@@ -322,7 +412,6 @@ def init_db():
 
     conn.commit()
     conn.close()
-
 
 
 if __name__ == '__main__':

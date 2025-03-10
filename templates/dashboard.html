@@ -13,9 +13,10 @@
         <div class="header-right">
             {% if session['user_id'] %}
                 <a href="{{ url_for('logout') }}" class="btn btn-danger">Iziet</a>
+                <a href="{{ url_for('change_password') }}" class="btn btn-secondary">Mainīt paroli</a>
                 {% if is_admin %}
                     <a href="{{ url_for('add_user') }}" class="btn btn-primary">Pievienot lietotāju</a>
-                    <a href="{{ url_for('view_users') }}" class="btn btn-secondary">Skatīt lietotājus</a>
+                    <a href="{{ url_for('view_users') }}" class="btn btn-warning">Skatīt lietotājus</a>
                 {% endif %}
             {% endif %}
         </div>
@@ -44,8 +45,10 @@
     </form>    
 
     <div class="d-flex justify-content-between align-items-center mb-3">
-        <h4>Inventāra saraksts</h4>
-        <div>
+        <h4 class="me-3" style="white-space: nowrap;">Inventāra saraksts</h4>
+            <input type="text" id="search-input" class="form-control form-control-sm me-3" placeholder="Meklēt" value="{{ request.args.get('search', '') }}" style="flex-grow: 1;">
+            <button id="search-btn" class="btn btn-primary me-3" style="height: 36px;">Meklēt</button>
+        <div style="min-width: 115px;">
             <label for="sort" class="form-label me-2">Kārtot:</label>
             <select id="sort" class="form-select" onchange="window.location.href=this.value;">
                 <option value="{{ url_for('dashboard', sort='alphabet') }}" {% if request.args.get('sort') == 'alphabet' %} selected {% endif %}>Alfabēta</option>
@@ -55,11 +58,20 @@
         </div>
     </div>
 
-    <ul class="list-group">
+    <ul class="list-group" id="item-list">
         {% for item in items %}
             <li class="list-group-item d-flex justify-content-between align-items-center">
                 <div>
                     <strong>{{ item.name }}</strong> ({{ item.quantity }})
+                    <br>
+                    <small class="text-muted">
+                        Pēdējo izmaiņu veicis: {{ item.last_modified_by_username or 'N/A' }} 
+                        {% if item.last_modified_at %}
+                            {{ convert_to_local_time(item.last_modified_at) }}
+                        {% else %}
+                            N/A
+                        {% endif %}
+                    </small>
                 </div>
                 <div class="d-flex">
                     <form method="POST" action="{{ url_for('update_quantity') }}" class="d-flex align-items-center">
@@ -72,30 +84,35 @@
                 </div>
             </li>
         {% endfor %}
-    </ul>
-    
+    </ul>    
 
     <script>
         $(document).ready(function() {
-            $("#name").on("input", function() {
-                let query = $(this).val();
-                if (query.length > 1) {
-                    $.get("{{ url_for('autocomplete') }}", { query: query }, function(data) {
-                        let autocompleteList = $("#autocomplete-list");
-                        autocompleteList.empty();
-                        data.forEach(function(item) {
-                            autocompleteList.append(`<div class="list-group-item list-group-item-action">${item}</div>`);
-                        });
-
-                        $(".list-group-item-action").on("click", function() {
-                            $("#name").val($(this).text());
-                            autocompleteList.empty();
-                        });
-                    });
-                }
+            $('#search-btn').on('click', function() {
+                var query = $('#search-input').val();
+                window.location.href = "{{ url_for('dashboard') }}?search=" + query;  // Perform the search
             });
         });
-        // Text Caps
+
+        $("#name").on("input", function() {
+            let query = $(this).val();
+            if (query.length > 1) {
+                $.get("{{ url_for('autocomplete') }}", { query: query }, function(data) {
+                    let autocompleteList = $("#autocomplete-list");
+                    autocompleteList.empty();
+                    data.forEach(function(item) {
+                        autocompleteList.append(`<div class="list-group-item list-group-item-action">${item}</div>`);
+                    });
+
+                    $(".list-group-item-action").on("click", function() {
+                        $("#name").val($(this).text());
+                        autocompleteList.empty();
+                    });
+                });
+            };
+        });
+
+        // Caps first letter
         document.getElementById("inventory-form").addEventListener("submit", function(event) {
         let itemNameInput = document.getElementById("name");
         let itemName = itemNameInput.value.trim();
